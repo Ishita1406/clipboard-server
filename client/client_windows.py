@@ -12,10 +12,12 @@ WS_BASE = os.getenv("WS_BASE")
 HTTP_BASE = os.getenv("HTTP_BASE")
 USERNAME = os.getenv("USERNAME", "userLinux")
 DEVICE_ID = os.getenv("DEVICE_ID","windowsA")
+PAIRING_KEY = os.getenv("PAIRING_KEY", "default-key")
 
 print("WS_BASE:", WS_BASE)
 print("HTTP_BASE:", HTTP_BASE)
 print("DEVICE_ID:", DEVICE_ID)
+print("PAIRING_KEY:", PAIRING_KEY)
 
 
 # Clipboard helpers (TEXT)
@@ -40,7 +42,8 @@ resp = requests.post(
     f"{HTTP_BASE}/login",
     json={
         "username": USERNAME,
-        "deviceId": DEVICE_ID
+        "deviceId": DEVICE_ID,
+        "pairingKey": PAIRING_KEY
     },
     timeout=5
 )

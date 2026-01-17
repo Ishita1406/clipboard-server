@@ -10,9 +10,12 @@ load_dotenv()
 
 WS_BASE = os.getenv("WS_BASE")
 HTTP_BASE = os.getenv("HTTP_BASE")
-print("Server Base URL:", WS_BASE)
 USERNAME = "userLinux"
 DEVICE_ID = os.getenv("DEVICE_ID")
+PAIRING_KEY = os.getenv("PAIRING_KEY", "default-key")
+
+print("Server Base URL:", WS_BASE)
+print("Pairing Key:", PAIRING_KEY)
 
 def get_clipboard_data():
     try:
@@ -111,7 +114,8 @@ resp = requests.post(
     f"{HTTP_BASE}/login",
     json={
         "username": USERNAME,
-        "deviceId": DEVICE_ID
+        "deviceId": DEVICE_ID,
+        "pairingKey": PAIRING_KEY
     }
 )
 token = resp.json()["token"]
