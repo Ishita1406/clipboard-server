@@ -18,6 +18,14 @@ def get_clipboard_data():
         # Check targets
         proc = subprocess.run(["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"], capture_output=True, text=True)
         targets = proc.stdout
+
+        if "text/uri-list" in targets:
+            proc = subprocess.run(["xclip", "-selection", "clipboard", "-t", "text/uri-list", "-o"], capture_output=True, text=True)
+            # The output is usually 'file:///path/to/file\r\n'
+            file_path = proc.stdout.strip().replace("file://", "")
+            if os.path.isfile(file_path):
+                with open(file_path, "rb") as f:
+                    return "file", f.read()
         
         if "image/png" in targets:
             proc = subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], capture_output=True)
@@ -49,7 +57,30 @@ def set_clipboard(type, content):
         except Exception as e:
             print("Failed to set image clipboard:", e)
 
-def upload_image(image_data):
+    elif type == "file":
+        try:
+            resp = requests.get(content)
+            # Extract filename from URL or use a default
+            filename = content.split("/")[-1] 
+            save_path = f"/tmp/{filename}"
+            
+            with open(save_path, "wb") as f:
+                f.write(resp.content)
+            
+            # Tell the system we have a file URI
+            uri = f"file://{save_path}"
+            subprocess.run(
+                ["xclip", "-selection", "clipboard", "-t", "text/uri-list"],
+                input=uri,
+                text=True,
+                check=True
+            )
+            print(f"File saved to {save_path} and path copied to clipboard")
+            return content 
+        except Exception as e:
+            print("Failed to set file clipboard:", e)
+
+def upload_binary(image_data):
     try:
         files = {'file': ('clipboard.png', image_data, 'image/png')}
         resp = requests.post(f"{HTTP_BASE}/upload", files=files)
@@ -108,8 +139,8 @@ def send_clipboard(type, content):
 
         if type == "text":
             payload["content"] = content
-        elif type == "image":
-            url = upload_image(content)
+        elif type == "image" or type == "file":
+            url = upload_binary(content)
             if not url:
                 return # Failed to upload
             payload["content"] = url
@@ -118,7 +149,7 @@ def send_clipboard(type, content):
 
         print("Sent clipboard")
         last_type = type
-        last_content = content  # update only if send succeeds
+        last_content = content  
     except websocket.WebSocketConnectionClosedException:
         print("Send failed: WebSocket closed, reconnecting...")
         reconnect_ws()
@@ -126,29 +157,9 @@ def send_clipboard(type, content):
 while True:
     ctype, current = get_clipboard_data()
     if ctype != "error" and (ctype != last_type or current != last_content):
-        # Avoid sending if we just received it (naive check, better to check timestamp or source)
-        # But for now, just send if changed.
-        # Note: Binary comparison for images might be slow but necessary.
         send_clipboard(ctype, current)
         last_type = ctype
         last_content = current
-
-    # try:
-    #     ws.settimeout(0.1)
-    #     msg = ws.recv()
-    #     print("Received message:", msg)
-    #     data = json.loads(msg)
-    #     if data["deviceId"] != DEVICE_ID:
-    #         set_clipboard(data["content"])
-    #         last = data["content"]
-    # except websocket.WebSocketTimeoutException:
-    #     # No new messages, this is fine
-    #     pass
-    # except websocket.WebSocketConnectionClosedException:
-    #     print("WebSocket closed, reconnecting...")
-    #     reconnect_ws()
-    # except Exception as e:
-    #     print("Unexpected error:", e)
 
     try:
         ws.settimeout(0.1)
@@ -161,24 +172,6 @@ while True:
                 print("Non-JSON message received:", repr(msg))
                 data = None
 
-            # if data and data.get("deviceId") != DEVICE_ID:
-            #     msg_type = data.get("type", "text") # Default to text for backward compatibility
-            #     set_clipboard(msg_type, data["content"])
-            #     last_type = msg_type
-            #     # For image, we don't have the raw bytes in 'data["content"]' (it's URL), 
-            #     # so we can't easily update last_content to match what get_clipboard_data returns (bytes).
-            #     # We might need to fetch it or just accept that next loop might re-read it.
-            #     # If we re-read it, it will match what we just set, so it shouldn't loop.
-            #     # However, get_clipboard_data returns bytes for image.
-            #     # We should probably update last_content with the bytes we set.
-            #     if msg_type == "image":
-            #          # We need to read back what we just set to keep state consistent?
-            #          # Or just fetch the bytes again from clipboard to be sure.
-            #          # Let's just let the loop handle it. It might re-send if bytes differ slightly?
-            #          # Ideally set_clipboard returns the bytes it set.
-            #          pass 
-            #     else:
-            #         last_content = data["content"]
             if data and data.get("deviceId") != DEVICE_ID:
                 msg_type = data.get("type", "text")
                 new_val = set_clipboard(msg_type, data["content"])
