@@ -25,14 +25,6 @@ function setupWebSocket(server) {
       return;
     }
 
-    ws.on('message', msg => {
-      for (const [client, user] of clients.entries()) {
-        if (client !== ws && user === clients.get(ws)) {
-          client.send(msg.toString());
-        }
-      }
-    });
-
 //    ws.on('message', msg => {
 //     console.log("Received message from", clients.get(ws), ":", msg.toString());
 //     console.log("Currently connected clients:");
@@ -47,6 +39,33 @@ function setupWebSocket(server) {
 //         }
 //     }
 // });
+
+ws.on('message', msg => {
+  const sender = clients.get(ws);
+
+  console.log("Received message from", sender, ":", msg.toString());
+  console.log("Currently connected clients:");
+
+  for (const [client, user] of clients.entries()) {
+    console.log(
+      " -",
+      user,
+      client === ws ? "(sender)" : ""
+    );
+  }
+
+  for (const [client, user] of clients.entries()) {
+    if (
+      client !== ws &&
+      user.username === sender.username &&
+      user.deviceId !== sender.deviceId
+    ) {
+      console.log("Sending message to client:", user);
+      client.send(msg.toString());
+    }
+  }
+});
+
 
     ws.on('close', () => clients.delete(ws));
   });
