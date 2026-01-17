@@ -5,6 +5,7 @@ import websocket
 import requests
 from dotenv import load_dotenv
 import os
+import urllib.parse
 load_dotenv()
 
 WS_BASE = os.getenv("WS_BASE")
@@ -21,12 +22,20 @@ def get_clipboard_data():
 
         if "text/uri-list" in targets:
             proc = subprocess.run(["xclip", "-selection", "clipboard", "-t", "text/uri-list", "-o"], capture_output=True, text=True)
-            # The output is usually 'file:///path/to/file\r\n'
-            file_path = proc.stdout.strip().replace("file://", "")
-            if os.path.isfile(file_path):
-                with open(file_path, "rb") as f:
-                    return "file", f.read()
-        
+            # Handle multiple files if necessary, but take the first for bare minimum
+            paths = proc.stdout.strip().splitlines()
+            if paths:
+                file_path = paths[0].strip()
+                if file_path.startswith("file://"):
+                    file_path = file_path[7:]
+                
+                file_path = urllib.parse.unquote(file_path)
+                
+                if os.path.isfile(file_path):
+                    with open(file_path, "rb") as f:
+                        # Return type, data, and the path so we can extract the name
+                        return "file", (f.read(), file_path)
+                    
         if "image/png" in targets:
             proc = subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], capture_output=True)
             return "image", proc.stdout
@@ -68,7 +77,7 @@ def set_clipboard(type, content):
                 f.write(resp.content)
             
             # Tell the system we have a file URI
-            uri = f"file://{save_path}"
+            uri = f"file://{save_path}\r\n"
             subprocess.run(
                 ["xclip", "-selection", "clipboard", "-t", "text/uri-list"],
                 input=uri,
@@ -80,9 +89,15 @@ def set_clipboard(type, content):
         except Exception as e:
             print("Failed to set file clipboard:", e)
 
-def upload_binary(image_data):
+def upload_binary(data, original_path=None):
     try:
-        files = {'file': ('clipboard.png', image_data, 'image/png')}
+        # Determine filename and type
+        if original_path:
+            filename = os.path.basename(original_path)
+        else:
+            filename = "clipboard_file"
+            
+        files = {'file': (filename, data, 'application/octet-stream')}
         resp = requests.post(f"{HTTP_BASE}/upload", files=files)
         resp.raise_for_status()
         return resp.json()["url"]
@@ -139,10 +154,13 @@ def send_clipboard(type, content):
 
         if type == "text":
             payload["content"] = content
-        elif type == "image" or type == "file":
-            url = upload_binary(content)
-            if not url:
-                return # Failed to upload
+        elif type == "image":
+            url = upload_binary(content) # Use default name for raw images
+            payload["content"] = url
+        elif type == "file":
+            file_bytes, file_path = content # Unpack the tuple
+            url = upload_binary(file_bytes, file_path) # Pass path to keep filename
+            if not url: return
             payload["content"] = url
 
         ws.send(json.dumps(payload))
