@@ -11,7 +11,7 @@ WS_BASE = os.getenv("WS_BASE")
 HTTP_BASE = os.getenv("HTTP_BASE")
 print("Server Base URL:", WS_BASE)
 USERNAME = "userLinux"
-DEVICE_ID = "linux-A" 
+DEVICE_ID = os.getenv("DEVICE_ID")
 
 def get_clipboard_data():
     try:
@@ -161,24 +161,31 @@ while True:
                 print("Non-JSON message received:", repr(msg))
                 data = None
 
+            # if data and data.get("deviceId") != DEVICE_ID:
+            #     msg_type = data.get("type", "text") # Default to text for backward compatibility
+            #     set_clipboard(msg_type, data["content"])
+            #     last_type = msg_type
+            #     # For image, we don't have the raw bytes in 'data["content"]' (it's URL), 
+            #     # so we can't easily update last_content to match what get_clipboard_data returns (bytes).
+            #     # We might need to fetch it or just accept that next loop might re-read it.
+            #     # If we re-read it, it will match what we just set, so it shouldn't loop.
+            #     # However, get_clipboard_data returns bytes for image.
+            #     # We should probably update last_content with the bytes we set.
+            #     if msg_type == "image":
+            #          # We need to read back what we just set to keep state consistent?
+            #          # Or just fetch the bytes again from clipboard to be sure.
+            #          # Let's just let the loop handle it. It might re-send if bytes differ slightly?
+            #          # Ideally set_clipboard returns the bytes it set.
+            #          pass 
+            #     else:
+            #         last_content = data["content"]
             if data and data.get("deviceId") != DEVICE_ID:
-                msg_type = data.get("type", "text") # Default to text for backward compatibility
-                set_clipboard(msg_type, data["content"])
-                last_type = msg_type
-                # For image, we don't have the raw bytes in 'data["content"]' (it's URL), 
-                # so we can't easily update last_content to match what get_clipboard_data returns (bytes).
-                # We might need to fetch it or just accept that next loop might re-read it.
-                # If we re-read it, it will match what we just set, so it shouldn't loop.
-                # However, get_clipboard_data returns bytes for image.
-                # We should probably update last_content with the bytes we set.
-                if msg_type == "image":
-                     # We need to read back what we just set to keep state consistent?
-                     # Or just fetch the bytes again from clipboard to be sure.
-                     # Let's just let the loop handle it. It might re-send if bytes differ slightly?
-                     # Ideally set_clipboard returns the bytes it set.
-                     pass 
-                else:
-                    last_content = data["content"]
+                msg_type = data.get("type", "text")
+                new_val = set_clipboard(msg_type, data["content"])
+    
+                if new_val is not None:
+                    last_type = msg_type
+                    last_content = new_val # This prevents the loop from re-sending
 
     except websocket.WebSocketTimeoutException:
         pass
