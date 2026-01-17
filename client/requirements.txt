@@ -1,4 +1,4 @@
-requests
 websocket-client
 python-dotenv
-pyperclip
+aiortc
+asyncio
