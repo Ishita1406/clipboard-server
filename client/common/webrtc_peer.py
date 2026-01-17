@@ -10,6 +10,26 @@ class WebRTCPeer:
 
         self.channel = self.pc.createDataChannel("clipboard")
         self.channel.on("message", self.on_message)
+        self.channel.on("open", self.on_channel_open)
+        self.channel.on("close", self.on_channel_close)
+        
+        self.is_ready = False
+        self.on_ready = getattr(self, "on_ready_callback", None) # Optional callback
+
+    def on_ready_callback(self):
+        print("Data channel is ready")
+
+    def on_channel_open(self):
+        print("Data Channel OPEN")
+        self.is_ready = True
+        if hasattr(self, "on_open_callback") and self.on_open_callback:
+            self.on_open_callback()
+
+    def on_channel_close(self):
+        print("Data Channel CLOSED")
+        self.is_ready = False
+        if hasattr(self, "on_close_callback") and self.on_close_callback:
+            self.on_close_callback()
 
         @self.pc.on("icecandidate")
         async def on_icecandidate(event):

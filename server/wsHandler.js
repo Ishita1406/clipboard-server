@@ -22,7 +22,7 @@ function setupWebSocket(server) {
         deviceId: payload.deviceId,
         pairingKey: payload.pairingKey
       });
-      console.log("Client connected:", payload.username, payload.deviceId, "Key:", payload.pairingKey);
+      console.log("Client connected:", payload.username, payload.deviceId);
 
     } catch {
       ws.close();
@@ -46,28 +46,39 @@ function setupWebSocket(server) {
 
     ws.on('message', msg => {
       const sender = clients.get(ws);
-
-      console.log("Received message from", sender, ":", msg.toString());
-      console.log("Currently connected clients:");
-
-      for (const [client, user] of clients.entries()) {
-        console.log(
-          " -",
-          user,
-          client === ws ? "(sender)" : ""
-        );
+      let data;
+      try {
+          data = JSON.parse(msg);
+      } catch (e) {
+          console.error("Invalid JSON:", msg.toString());
+          return;
       }
 
-      for (const [client, user] of clients.entries()) {
-        // Broadcast to clients with the same pairingKey, but different deviceId
-        if (
-          client !== ws &&
-          user.pairingKey === sender.pairingKey &&
-          user.deviceId !== sender.deviceId
-        ) {
-          console.log("Sending message to client:", user);
-          client.send(msg.toString());
-        }
+      // Signaling types: 'offer', 'answer', 'ice'
+      const signalingTypes = ['offer', 'answer', 'ice'];
+
+      if (signalingTypes.includes(data.type)) {
+          console.log(`Relaying ${data.type} from ${sender.deviceId} to peers`);
+          
+          for (const [client, user] of clients.entries()) {
+            // Relay to other devices with same pairingKey
+            if (
+              client !== ws &&
+              user.pairingKey === sender.pairingKey &&
+              user.deviceId !== sender.deviceId
+            ) {
+              // If target is specified, only send to that target
+              if (data.target && user.deviceId !== data.target) {
+                  continue;
+              }
+              
+              // Attach senderId so receiver knows who sent it
+              const forwardedMsg = { ...data, senderId: sender.deviceId };
+              client.send(JSON.stringify(forwardedMsg));
+            }
+          }
+      } else {
+          console.log("Ignored non-signaling message type:", data.type);
       }
     });
 

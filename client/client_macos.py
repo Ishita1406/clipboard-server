@@ -208,7 +208,12 @@ import json
 import websockets
 import requests
 import os
+import sys
 from dotenv import load_dotenv
+
+# Ensure we can import from common
+sys.path.append(os.path.join(os.path.dirname(__file__), "common"))
+from webrtc_peer import WebRTCPeer
 
 print("CLIENT MAC STARTED")
 
@@ -237,52 +242,98 @@ def set_clipboard_text(text):
 # ================== MAIN ASYNC LOGIC ==================
 async def main():
     print("Mac async main started")
+    
+    offline_queue = []
 
     # ---------- LOGIN ----------
-    resp = requests.post(
-        f"{HTTP_BASE}/login",
-        json={
-            "username": USERNAME,
-            "deviceId": DEVICE_ID,
-            "pairingKey": PAIRING_KEY
-        }
-    )
-    token = resp.json()["token"]
+    try:
+        resp = requests.post(
+            f"{HTTP_BASE}/login",
+            json={
+                "username": USERNAME,
+                "deviceId": DEVICE_ID,
+                "pairingKey": PAIRING_KEY
+            }
+        )
+        resp.raise_for_status()
+        token = resp.json()["token"]
+    except Exception as e:
+        print(f"Login failed: {e}")
+        return
 
     print("Mac logged in")
 
-    # ---------- CONNECT WS ----------
+    # ---------- SIGNALING & PEER SETUP ----------
     ws_url = f"{WS_BASE}/?token={token}"
+    
+    # We need a reference to ws to send signaling messages
+    ws_ref = None
+
+    async def signaling_send(data):
+        if ws_ref:
+            # Add target routing if needed, or just broadcast
+            # For now, we broadcast signaling to all peers in room
+            await ws_ref.send(json.dumps(data))
+
+    def on_remote_clipboard(content):
+        print(f"Received clipboard content: {content[:20]}...")
+        set_clipboard_text(content)
+        # Update last_text to avoid echo
+        nonlocal last_text
+        last_text = content
+
+    peer = WebRTCPeer(signaling_send, on_remote_clipboard)
+    
+    # Hook into channel state for offline queue
+    def flush_queue():
+        print(f"Flushing {len(offline_queue)} items from offline queue")
+        while offline_queue:
+            item = offline_queue.pop(0)
+            peer.send_clipboard(item)
+            
+    peer.on_open_callback = flush_queue
+
+    # ---------- CONNECTION LOOP ----------
     async with websockets.connect(ws_url) as ws:
-        print("Mac WebSocket connected")
+        print("Mac WebSocket connected (Signaling)")
+        ws_ref = ws
+        
+        # Start P2P offer
+        await peer.create_offer()
 
         last_text = ""
+
+        async def listen_ws():
+            async for msg in ws:
+                data = json.loads(msg)
+                # Handle Signaling
+                if data.get("senderId") == DEVICE_ID:
+                    continue # Ignore own messages if reflected
+
+                if data.get("type") == "offer":
+                    await peer.handle_offer(data["sdp"])
+                elif data.get("type") == "answer":
+                    await peer.handle_answer(data["sdp"])
+                elif data.get("type") == "ice":
+                    await peer.handle_ice(data["candidate"])
+
+        # Run listener in background
+        asyncio.create_task(listen_ws())
 
         while True:
             # SEND clipboard
             text = get_clipboard_text()
             if text and text != last_text:
-                payload = {
-                    "type": "text",
-                    "content": text,
-                    "deviceId": DEVICE_ID
-                }
-                await ws.send(json.dumps(payload))
-                print("Mac sent text")
+                print("Clipboard changed on Mac")
+                if peer.is_ready:
+                    peer.send_clipboard(text)
+                    print("Sent via P2P")
+                else:
+                    print("P2P not ready, queuing...")
+                    if text not in offline_queue:
+                        offline_queue.append(text)
+                
                 last_text = text
-
-            # RECEIVE clipboard
-            try:
-                msg = await asyncio.wait_for(ws.recv(), timeout=0.2)
-                data = json.loads(msg)
-
-                if data["deviceId"] != DEVICE_ID and data["type"] == "text":
-                    set_clipboard_text(data["content"])
-                    last_text = data["content"]
-                    print("Mac received text")
-
-            except asyncio.TimeoutError:
-                pass
 
             await asyncio.sleep(0.5)
 
