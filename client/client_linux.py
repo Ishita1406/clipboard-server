@@ -19,7 +19,13 @@ def get_clipboard():
     return res
 
 def set_clipboard(text):
-    subprocess.run("xclip -selection clipboard", input=text, text=True)
+    subprocess.run(
+        ["xclip", "-selection", "clipboard"],
+        input=text,
+        text=True,
+        check=True
+    )
+
 
 # Login
 resp = requests.post(
